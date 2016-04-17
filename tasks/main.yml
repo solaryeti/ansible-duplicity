@@ -1,0 +1,45 @@
+---
+- name: duplicity package
+  zypper: name=duplicity state=present
+  tags: [duplicity, backup]
+
+- name: paramiko package
+  zypper: name=python-paramiko state=present
+  tags: [duplicity, backup]
+
+- name: duplicity log dir
+  file: dest=/var/log/duplicity
+        owner=root
+        group=root
+        mode=0755
+        state=directory
+  tags: [duplicity, backup]
+
+- name: backup script
+  template: dest=/usr/local/sbin/duplicity-backup.sh
+            src=duplicity-backup.sh.j2
+            owner=root
+            group=root
+            mode=0750
+  tags: [duplicity, backup]
+
+- name: logrotate file for log
+  template: dest=/etc/logrotate.d/duplicity-backup
+            src=logrotate-duplicity.j2
+            owner=root
+            group=root
+            mode=0644
+  tags: [duplicity, backup]
+
+- name: copy public gpg key
+  copy: dest=/root/public-gpg-key
+        src={{ gpg_pub_key }}
+        owner=root
+        group=root
+        mode=0600
+  tags: [duplicity, backup]
+
+- name: cron job for duplicity backup
+  file: src=/usr/local/sbin/duplicity-backup.sh dest=/etc/cron.{{ backup_time }}/duplicity-backup
+        owner=root group=root state=link
+  tags: [ duplicity, backup ]

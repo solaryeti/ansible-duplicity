@@ -1,0 +1,104 @@
+#!/bin/bash
+#
+# Simple script for creating backups with Duplicity.
+# Full backups are made on the 1st day of each month or with the 'full' option.
+# Incremental backups are made on any other days.
+#
+# USAGE: backup.sh [full]
+#
+set -e
+
+# Set protocol (use scp for sftp and ftp for FTP, see manpage for more)
+BPROTO=scp
+
+# set user and hostname of backup account
+BUSER='{{ backup_user }}'
+BHOST='{{ backup_host }}'
+
+# Setting the password for the Backup account that the
+# backup files will be transferred to.
+# for sftp a public key can be used, see:
+# http://wiki.hetzner.de/index.php/Backup
+FTP_PASSWORD='{{ backup_user_pass }}'
+export FTP_PASSWORD
+
+# directories to backup (but . for /)
+BDIRS='{{ backup_dirs|join(" ") }}'
+LOGDIR='/var/log/duplicity'
+LOGFILE="${LOGDIR}/duplicity.log"
+
+{% if encrypt_key %}
+ENCRYPT_KEY='--encrypt-key {{ encrypt_key }}'
+{% else %}
+# Setting the pass phrase to encrypt the backup files. Will use symmetrical keys in this case.
+ENCRYPT_KEY=''
+PASSPHRASE='{{ encrypt_passphrase }}'
+export PASSPHRASE
+{% endif %}
+
+# encryption algorithm for gpg, disable for default (CAST5)
+# see available ones via 'gpg --version'
+ALGO=AES
+
+COMMON_OPTS="--ssh-backend pexpect --verbosity 5 --volsize 500"
+##############################
+
+if [ $ALGO ]; then
+    GPGOPT="--gpg-options '--cipher-algo $ALGO'"
+fi
+
+BAC="$BPROTO://$BUSER@$BHOST"
+
+if [ "$1" = 'full' ]; then
+    FULL='full'
+else
+    FULL='--full-if-older-than {{ time_period_incremental_backups }}'
+fi
+
+# trap handler for when something goes wrong
+function err_handler() {
+    /usr/bin/tail -n 25 $LOGFILE | /usr/bin/mail -s "Backup failed on {{ ansible_fqdn }} at $(date)" -a $LOGFILE {{ backup_email }}
+}
+trap err_handler ERR
+
+echo "Starting backup at $(date)" >> $LOGFILE
+
+for DIR in $BDIRS
+do
+    if [ $DIR = '/' ]; then
+        EXCLUDELIST='/usr/local/etc/duplicity-exclude.conf'
+    else
+        EXCLUDELIST="/usr/local/etc/duplicity-exclude-$DIR.conf"
+    fi
+
+    if [ -f $EXCLUDELIST ]; then
+        EXCLUDE="--exclude-filelist $EXCLUDELIST"
+    else
+        EXCLUDE=''
+    fi
+
+    # first remove all old backups
+    if [ $DIR = '/' ]; then
+        CMD="duplicity remove-older-than {{ time_period_keep_backups }} $COMMON_OPTS --force $BAC/$(hostname -f)/root >> $LOGFILE"
+    else
+        CMD="duplicity remove-older-than {{ time_period_keep_backups }} $COMMON_OPTS --force $BAC/$(hostname -f)/$DIR >> $LOGFILE"
+    fi
+    eval $CMD
+
+    # do a backup
+    if [ $DIR = '/' ]; then
+        CMD="duplicity $FULL $COMMON_OPTS $ENCRYPT_KEY $GPGOPT $EXCLUDE / $BAC/$(hostname -f)/root >> $LOGFILE"
+    else
+        CMD="duplicity $FULL $COMMON_OPTS $ENCRYPT_KEY $GPGOPT $EXCLUDE /$DIR $BAC/$(hostname -f)/$DIR >> $LOGFILE"
+    fi
+    eval $CMD
+    EXIT_CODE=$?
+
+done
+
+# Check the manpage for all available options for Duplicity.
+# Unsetting the confidential variables
+unset PASSPHRASE
+unset FTP_PASSWORD
+
+exit $EXIT_CODE
