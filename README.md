@@ -5,6 +5,9 @@ Ansible role for making remote, incremental, encrypted backups with [duplicity](
 
 This role has been developed specifically for backing up servers over ftp in Hetzner's datacenter. Although all settings are configurable, the assumption is that a backup will be made to a remote ftp server.
 
+## Compatability
+
+This role has been developed for use with *openSUSE* and has been tested against ansible 1.9.x.
 
 ## Variables
 
